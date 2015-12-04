@@ -1,0 +1,6 @@
+*~
+/build
+/srcs/debian
+/srcs/linux-*
+/srcs/u-boot-*
+/srcs/gcc-*

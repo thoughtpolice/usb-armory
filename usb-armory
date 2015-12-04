@@ -1,0 +1,348 @@
+#!/usr/bin/env bash
+
+unset CDPATH
+
+## -----------------------------------------------------------------------------
+## -- Setup
+
+SOURCE="${BASH_SOURCE[0]}"
+while [ -h "$SOURCE" ]; do # resolve $SOURCE until the file is no longer a symlink
+  DIR="$( cd -P "$( dirname "$SOURCE" )" && pwd )"
+  SOURCE="$(readlink "$SOURCE")"
+  [[ $SOURCE != /* ]] && SOURCE="$DIR/$SOURCE" # if $SOURCE was a relative symlink, we need to resolve it relative to the path where the symlink file was located
+done
+SOURCE_DIR="$( cd -P "$( dirname "$SOURCE" )" && pwd )"
+
+BASHMENOT_LOG_TIMESTAMP=1
+BASHMENOT_NO_SELF_UPDATE=1
+. $SOURCE_DIR/.bashmenot/src.sh
+
+DEVICE=
+# TODO FIXME: make this configurable
+
+BLDDIR="$SOURCE_DIR/build"
+MNTDIR="/mnt/usbarmory"
+
+export ARCH=arm
+export TOOLCHAIN_DIR=$SOURCE_DIR/srcs
+export CROSS_COMPILE=$TOOLCHAIN_DIR/gcc-linaro-arm-none-eabi-4.9-2014.09_linux/bin/arm-none-eabi-
+
+## -----------------------------------------------------------------------------
+## -- Grab sources
+
+function do_download {
+  if ! [ -e "$2" ]; then
+    curl_download "$1" "$2"
+  fi
+}
+
+function grab_toolchain_bin {
+  do_download https://releases.linaro.org/14.09/components/toolchain/binaries/gcc-linaro-arm-none-eabi-4.9-2014.09_linux.tar.xz srcs/gcc-linaro-arm-none-eabi-4.9-2014.09_linux.tar.xz 
+}
+
+function grab_linux_src {
+  do_download https://cdn.kernel.org/pub/linux/kernel/v4.x/linux-4.2.6.tar.xz srcs/linux-4.2.6.tar.xz
+}
+
+function grab_uboot_src {
+  do_download ftp://ftp.denx.de/pub/u-boot/u-boot-2015.10.tar.bz2 srcs/u-boot-2015.10.tar.bz2
+}
+
+function grab_grsec_src {
+  do_download https://grsecurity.net/test/grsecurity-3.1-4.2.6-201511232037.patch srcs/grsecurity-3.1-4.2.6-201511232037.patch
+  do_download https://grsecurity.net/stable/gradm-3.1-201507191652.tar.gz srcs/gradm-3.1-201507191652.tar.gz
+}
+
+function grab_debian_src {
+  do_download https://raw.githubusercontent.com/inversepath/usbarmory/master/software/debian_conf/rc.local srcs/debian/rc.local
+  do_download https://raw.githubusercontent.com/inversepath/usbarmory/master/software/debian_conf/sources.list srcs/debian/sources.list
+  do_download https://raw.githubusercontent.com/inversepath/usbarmory/master/software/debian_conf/dhcpd.conf srcs/debian/dhcpd.conf
+}
+
+function do_downloads {
+  grab_toolchain_bin
+  grab_linux_src
+  grab_uboot_src
+  #grab_grsec_src
+  grab_debian_src
+
+  if ! [ -d "$TOOLCHAIN_DIR/gcc-linaro-arm-none-eabi-4.9-2014.09_linux" ]; then
+    cd $SOURCE_DIR/srcs
+    tar xf gcc-linaro-arm-none-eabi-4.9-2014.09_linux.tar.xz
+    cd $SOURCE_DIR
+  fi
+}
+
+## -----------------------------------------------------------------------------
+## -- SD Prep
+
+function sdcard_prep {
+  log_begin "WRITE: Partitioning $DEVICE with parted..."
+  parted $DEVICE --script mklabel msdos                2>&1 >/dev/null
+  parted $DEVICE --script mkpart primary ext4 5M 100%  2>&1 >/dev/null
+  log_end "OK"
+
+  log_begin "WRITE: Writing ext4 filesystem..."
+  mkfs.ext4 -q ${DEVICE}p1
+  log_end "OK"
+
+  mount ${DEVICE}p1 $MNTDIR
+
+}
+
+## -----------------------------------------------------------------------------
+## -- Debian build
+
+function image_debian {
+  if [ -e "$BLDDIR/.image-built" ]; then
+    log "IMAGE: Debian image already built."
+    return 0;
+  fi
+
+  log_begin "IMAGE: Installing Debian image..."
+  (qemu-debootstrap --arch=armhf --include=ssh,sudo,ntpdate,fake-hwclock,openssl,shellinabox,vim,nano,cryptsetup,lvm2,locales,less,cpufrequtils,isc-dhcp-server jessie $MNTDIR http://ftp.debian.org/debian/) 2>&1 >/dev/null
+
+  cp srcs/debian/rc.local     ${MNTDIR}/etc/rc.local
+  cp srcs/debian/sources.list ${MNTDIR}/etc/apt/sources.list
+  cp srcs/debian/dhcpd.conf   ${MNTDIR}/etc/dhcp/dhcpd.conf
+
+  sed -i -e 's/INTERFACES=""/INTERFACES="usb0"/' ${MNTDIR}/etc/default/isc-dhcp-server
+  echo "tmpfs /tmp tmpfs defaults 0 0" > ${MNTDIR}/etc/fstab
+  echo -e "\nUseDNS no" >> ${MNTDIR}/etc/ssh/sshd_config
+  echo "nameserver 8.8.8.8" > ${MNTDIR}/etc/resolv.conf
+  chroot $MNTDIR systemctl mask getty-static.service
+  chroot $MNTDIR systemctl mask isc-dhcp-server.service
+
+  touch "$BLDDIR/.image-built"
+  log_end "OK"
+}
+
+
+## -----------------------------------------------------------------------------
+## -- Ubuntu build
+
+function image_ubuntu {
+  if [ -e "$BLDDIR/.image-built" ]; then
+    log "IMAGE: Ubuntu image already built."
+    return 0;
+  fi
+
+  log_error "NIH"
+}
+
+
+## -----------------------------------------------------------------------------
+## -- Finalize
+
+function finalize_image {
+  if [ -e "$BLDDIR/.image-finalized" ]; then
+    log "IMAGE: Image already finalized.";
+    return 0;
+  fi
+
+  log_begin "IMAGE: Finalizing and setting password..."
+
+  echo "ledtrig_heartbeat" >> ${MNTDIR}/etc/modules
+  echo "ci_hdrc_imx"       >> ${MNTDIR}/etc/modules
+  echo "g_ether"           >> ${MNTDIR}/etc/modules
+
+  echo "options g_ether use_eem=0 dev_addr=1a:55:89:a2:69:41 host_addr=1a:55:89:a2:69:42" >> ${MNTDIR}/etc/modprobe.d/usbarmory.conf
+  echo -e 'allow-hotplug usb0\niface usb0 inet static\n  address 10.0.0.1\n  netmask 255.255.255.0\n  gateway 10.0.0.2' >> ${MNTDIR}/etc/network/interfaces
+
+  echo "usbarmory" > ${MNTDIR}/etc/hostname
+  echo "usbarmory  ALL=(ALL) NOPASSWD: ALL" >> ${MNTDIR}/etc/sudoers
+  echo -e "127.0.1.1\tusbarmory" >> ${MNTDIR}/etc/hosts
+  chroot $MNTDIR /usr/sbin/useradd -s /bin/bash -p `mkpasswd -m sha-512 usbarmory` -m usbarmory
+  rm ${MNTDIR}/usr/bin/qemu-arm-static
+
+  touch "$BLDDIR/.image-finalized"
+  log_end "OK"
+}
+
+
+## -----------------------------------------------------------------------------
+## -- Kernel build (w/ grsecurity)
+
+function build_kernel {
+  if [ -e "$MNTDIR/boot/uImage" ]; then
+      log "KERNEL: Kernel image already built"
+      return 0;
+  fi
+
+  if ! [ -e "$BLDDIR/.kernel-extracted" ]; then
+      log_begin "KERNEL: Extracting source..."
+      cd srcs
+      tar xf linux-*.tar.xz
+      cd linux-*
+      patch -s -p1 < $SOURCE_DIR/srcs/0008-USB-armory-support.patch
+      log_end "OK"
+  fi
+  touch "$BLDDIR/.kernel-extracted"
+
+  log_begin "KERNEL: Building Linux kernel..."
+
+  (cp $SOURCE_DIR/srcs/usbarmory_linux-4.2.config .config && \
+     make uImage LOADADDR=0x70008000 modules imx53-usbarmory.dtb && \
+     cp arch/arm/boot/uImage ${MNTDIR}/boot/ && \
+     cp arch/arm/boot/dts/imx53-usbarmory.dtb ${MNTDIR}/boot/imx53-usbarmory.dtb && \
+     make INSTALL_MOD_PATH=$MNTDIR ARCH=arm modules_install) 2>&1 >/dev/null
+
+  cd $SOURCE_DIR
+  log_end "OK"
+}
+
+
+## -----------------------------------------------------------------------------
+## -- U-boot build
+
+function build_uboot {
+  if [ -e $BLDDIR/u-boot.imx ]; then
+    log "UBOOT: Already compiled."
+    return 0
+  fi
+
+  log_begin "UBOOT: building U-Boot with usbarmory_config..."
+  (cd srcs && tar xf u-boot-*.tar.bz2 && cd u-boot* && \
+    make distclean && \
+    make usbarmory_config && \
+    make ARCH=arm -j && \
+    cd ../../) 2>&1 >/dev/null
+  cp srcs/u-boot*/u-boot.imx $BLDDIR
+  log_end "OK"
+}
+
+
+## -----------------------------------------------------------------------------
+## -- Writing the final image
+
+function sdcard_finish {
+  log_begin "WRITE: Syncing filesystem and unmounting..."
+  sync && umount $MNTDIR
+  log_end "OK"
+
+  log_begin "WRITE: Imaging U-Boot onto SD card..."
+  dd if=${BLDDIR}/u-boot.imx of=${DEVICE} bs=512 seek=2 conv=fsync >& /dev/null
+  log_end "OK"
+}
+
+## -----------------------------------------------------------------------------
+## -- Basic stuff
+
+function help {
+  local TXT=$(cat <<EOF
+usage: ./do [option]*
+
+  Build a full USB Armory image and write it straight to an SD card.
+
+actions:
+  -d, --device <dev>             Build and write image to specified device
+  -g, --grsecurity               Enable a grsecurity kernel build
+  -i, --image <distro>           Distro - options: ubuntu, debian (default)
+  -l, --link                     Link usbarmory IP on usb0
+  -s, --shutdown                 Shut down your USB armory
+
+help:
+  Released in the public domain.
+  Report bugs to <aseipp@pobox.com> and they might get fixed.
+EOF
+)
+  echo "$TXT" && exit 0
+}
+
+function usbarmory_build {
+  if ! [[ $DEVICE = /dev/* ]]; then
+    die "Specified device is not under /dev! Bailing out."
+  fi
+
+  log "Imaging $DEVICE with USB Armory SD card image."
+  log "Will mount at $MNTDIR to install the system image."
+  log "First though, we'll download all the needed files..."
+
+  ## --------------------
+  ## -- Do the main dance
+
+  mkdir -p $BLDDIR   # -- 0) Setup build directory
+  mkdir -p $MNTDIR
+
+  do_downloads       # -- 1) Do downloads
+  sdcard_prep
+  image_debian       # -- 2) Do ARM debootstrap
+  finalize_image     # -- 3) Setup final image
+  build_kernel       # -- 4) Build kernel
+  build_uboot        # -- 5) Build U-Boot
+  sdcard_finish      # -- 6) Write image, kernel and U-Boot
+
+  ## -- Mount, write image and u-boot, then unmount
+
+
+  log "OK, you should be good to go! (user and pass: usbarmory/usbarmory)"
+  exit 0
+}
+
+function usbarmory_link {
+  if [ "$(id -u)" != "0" ]; then
+    die "ERROR: You must be root to run this script"
+  fi
+
+  log_begin "INFO: Setting up usb0 device... "
+  ip link set usb0 up
+  ip addr add 10.0.0.2/24 dev usb0
+  log_end "OK"
+
+  log_begin "INFO: Using iptables to route traffic... "
+  iptables -t nat -A POSTROUTING -s 10.0.0.1/32 -o wlan0 -j MASQUERADE
+  echo 1 > /proc/sys/net/ipv4/ip_forward
+  log_end "OK"
+
+  log "Done. USB armory should be available @ 10.0.0.1"
+  exit 0
+}
+
+function usbarmory_off {
+  echo -n "INFO: Shutting down USB armory... "
+  ssh usbarmory@10.0.0.1 -- sudo shutdown -h now
+  echo "OK"
+  exit 0
+}
+
+## -----------------------------------------------------------------------------
+## -- Main driver
+
+HELP=0
+while [[ $# > 0 ]]
+do
+  key="$1"
+  case $key in
+      -h|--help|help)
+      HELP=1
+      ;;
+
+      -d|--device)
+      BUILD=1
+      DEVICE="$2"
+      shift
+      ;;
+
+      -l|--link)
+      LINK=1
+      ;;
+
+      -s|--shutdown)
+      SHUTDOWN=1
+      ;;
+
+      *)
+      # unknown option
+      log_error "Unrecognized argument: $key (try --help)" && exit 1
+      ;;
+  esac
+  shift
+done
+
+if [ "$HELP" = "1" ];      then help; fi
+if [ "$BUILD" = "1" ];     then usbarmory_build; fi
+if [ "$LINK" = "1" ];      then usbarmory_link; fi
+if [ "$SHUTDOWN" = "1" ];  then usbarmory_off;  fi
+
+# Error out
+log_error "Requires an argument (try --help)" && exit 1
