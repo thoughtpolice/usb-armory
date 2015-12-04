@@ -14,12 +14,25 @@ $ ln -s $PWD/usb-armory/usb-armory $HOME/bin/usb-armory
 To build a new, clean Debian Jessie image for your USB Armory:
 
 ```
-$ usb-armory --device /dev/mmcblk0
+$ sudo usb-armory --device /dev/mmcblk0
 ```
 
 This might take a while. On my Sandy Bridge i5-2520M CPU @ 2.50GHz, it
 took a little less than an hour to do everything including downloads,
 compiling, etc.
+
+If that works, first off, you're lucky. After congratulating yourself,
+try putting the SD card into your USB Armory, and plug it in. You
+should see a blinking light once the kernel is booted. Now try this:
+
+```
+$ sudo usb-armory --link
+$ ssh -o PreferredAuthentications=password usbarmory@10.0.0.1
+```
+
+The first command sets up some iptables routes, so you can SSH in and
+it can talk to the internet. The second command SSHs in (and ignores
+any keys you might have, since it doesn't install any).
 
 Also try `--help`.
 
