@@ -30,9 +30,10 @@ $ sudo usb-armory --link
 $ ssh -o PreferredAuthentications=password usbarmory@10.0.0.1
 ```
 
-The first command sets up some iptables routes, so you can SSH in and
-it can talk to the internet. The second command SSHs in (and ignores
-any keys you might have, since it doesn't install any).
+The first command sets up an IP device (`usb0`) and some iptables
+routes, so you can SSH in and it can talk to the internet. The second
+command SSHs in (and ignores any keys you might have, since it doesn't
+install any).
 
 Also try `--help`.
 
