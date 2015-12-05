@@ -37,26 +37,26 @@ function do_download {
 }
 
 function grab_toolchain_bin {
-  do_download https://releases.linaro.org/14.09/components/toolchain/binaries/gcc-linaro-arm-none-eabi-4.9-2014.09_linux.tar.xz srcs/gcc-linaro-arm-none-eabi-4.9-2014.09_linux.tar.xz 
+  do_download https://releases.linaro.org/14.09/components/toolchain/binaries/gcc-linaro-arm-none-eabi-4.9-2014.09_linux.tar.xz $SOURCE_DIR/srcs/gcc-linaro-arm-none-eabi-4.9-2014.09_linux.tar.xz 
 }
 
 function grab_linux_src {
-  do_download https://cdn.kernel.org/pub/linux/kernel/v4.x/linux-4.2.6.tar.xz srcs/linux-4.2.6.tar.xz
+  do_download https://cdn.kernel.org/pub/linux/kernel/v4.x/linux-4.2.6.tar.xz $SOURCE_DIR/srcs/linux-4.2.6.tar.xz
 }
 
 function grab_uboot_src {
-  do_download ftp://ftp.denx.de/pub/u-boot/u-boot-2015.10.tar.bz2 srcs/u-boot-2015.10.tar.bz2
+  do_download ftp://ftp.denx.de/pub/u-boot/u-boot-2015.10.tar.bz2 $SOURCE_DIR/srcs/u-boot-2015.10.tar.bz2
 }
 
 function grab_grsec_src {
-  do_download https://grsecurity.net/test/grsecurity-3.1-4.2.6-201511232037.patch srcs/grsecurity-3.1-4.2.6-201511232037.patch
-  do_download https://grsecurity.net/stable/gradm-3.1-201507191652.tar.gz srcs/gradm-3.1-201507191652.tar.gz
+  do_download https://grsecurity.net/test/grsecurity-3.1-4.2.6-201511232037.patch $SOURCE_DIR/srcs/grsecurity-3.1-4.2.6-201511232037.patch
+  do_download https://grsecurity.net/stable/gradm-3.1-201507191652.tar.gz $SOURCE_DIR/srcs/gradm-3.1-201507191652.tar.gz
 }
 
 function grab_debian_src {
-  do_download https://raw.githubusercontent.com/inversepath/usbarmory/master/software/debian_conf/rc.local srcs/debian/rc.local
-  do_download https://raw.githubusercontent.com/inversepath/usbarmory/master/software/debian_conf/sources.list srcs/debian/sources.list
-  do_download https://raw.githubusercontent.com/inversepath/usbarmory/master/software/debian_conf/dhcpd.conf srcs/debian/dhcpd.conf
+  do_download https://raw.githubusercontent.com/inversepath/usbarmory/master/software/debian_conf/rc.local $SOURCE_DIR/srcs/debian/rc.local
+  do_download https://raw.githubusercontent.com/inversepath/usbarmory/master/software/debian_conf/sources.list $SOURCE_DIR/srcs/debian/sources.list
+  do_download https://raw.githubusercontent.com/inversepath/usbarmory/master/software/debian_conf/dhcpd.conf $SOURCE_DIR/srcs/debian/dhcpd.conf
 }
 
 function do_downloads {
@@ -102,9 +102,9 @@ function image_debian {
   log_begin "IMAGE: Installing Debian image..."
   (qemu-debootstrap --arch=armhf --include=ssh,sudo,ntpdate,fake-hwclock,openssl,shellinabox,vim,nano,cryptsetup,lvm2,locales,less,cpufrequtils,isc-dhcp-server jessie $MNTDIR http://ftp.debian.org/debian/) 2>&1 >/dev/null
 
-  cp srcs/debian/rc.local     ${MNTDIR}/etc/rc.local
-  cp srcs/debian/sources.list ${MNTDIR}/etc/apt/sources.list
-  cp srcs/debian/dhcpd.conf   ${MNTDIR}/etc/dhcp/dhcpd.conf
+  cp $SOURCE_DIR/srcs/debian/rc.local     ${MNTDIR}/etc/rc.local
+  cp $SOURCE_DIR/srcs/debian/sources.list ${MNTDIR}/etc/apt/sources.list
+  cp $SOURCE_DIR/srcs/debian/dhcpd.conf   ${MNTDIR}/etc/dhcp/dhcpd.conf
 
   sed -i -e 's/INTERFACES=""/INTERFACES="usb0"/' ${MNTDIR}/etc/default/isc-dhcp-server
   echo "tmpfs /tmp tmpfs defaults 0 0" > ${MNTDIR}/etc/fstab
@@ -171,7 +171,7 @@ function build_kernel {
 
   if ! [ -e "$BLDDIR/.kernel-extracted" ]; then
       log_begin "KERNEL: Extracting source..."
-      cd srcs
+      cd $SOURCE_DIR/srcs
       tar xf linux-*.tar.xz
       cd linux-*
       patch -s -p1 < $SOURCE_DIR/srcs/0008-USB-armory-support.patch
@@ -202,12 +202,12 @@ function build_uboot {
   fi
 
   log_begin "UBOOT: building U-Boot with usbarmory_config..."
-  (cd srcs && tar xf u-boot-*.tar.bz2 && cd u-boot* && \
+  (cd $SOURCE_DIR/srcs && tar xf u-boot-*.tar.bz2 && cd u-boot* && \
     make distclean && \
     make usbarmory_config && \
     make ARCH=arm -j && \
-    cd ../../) 2>&1 >/dev/null
-  cp srcs/u-boot*/u-boot.imx $BLDDIR
+    cd $SOURCE_DIR) 2>&1 >/dev/null
+  cp $SOURCE_DIR/srcs/u-boot*/u-boot.imx $BLDDIR
   log_end "OK"
 }
 
