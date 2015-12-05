@@ -4,3 +4,5 @@
 /srcs/linux-*
 /srcs/u-boot-*
 /srcs/gcc-*
+/srcs/cross-arm-unknown-linux-gnueabi.tgz
+/srcs/arm-unknown-linux-gnueabi/

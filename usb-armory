@@ -18,14 +18,15 @@ BASHMENOT_NO_SELF_UPDATE=1
 . $SOURCE_DIR/.bashmenot/src.sh
 
 DEVICE=
-# TODO FIXME: make this configurable
-
 BLDDIR="$SOURCE_DIR/build"
 MNTDIR="/mnt/usbarmory"
 
 export ARCH=arm
 export TOOLCHAIN_DIR=$SOURCE_DIR/srcs
-export CROSS_COMPILE=$TOOLCHAIN_DIR/gcc-linaro-arm-none-eabi-4.9-2014.09_linux/bin/arm-none-eabi-
+export CROSS_COMPILE=$TOOLCHAIN_DIR/arm-unknown-linux-gnueabi/bin/arm-unknown-linux-gnueabi-
+
+GRSECURITY=
+KERNEL_ONLY=
 
 ## -----------------------------------------------------------------------------
 ## -- Grab sources
@@ -37,7 +38,7 @@ function do_download {
 }
 
 function grab_toolchain_bin {
-  do_download https://releases.linaro.org/14.09/components/toolchain/binaries/gcc-linaro-arm-none-eabi-4.9-2014.09_linux.tar.xz $SOURCE_DIR/srcs/gcc-linaro-arm-none-eabi-4.9-2014.09_linux.tar.xz 
+  do_download https://grsecurity.net/~spender/cross-arm-unknown-linux-gnueabi.tgz $SOURCE_DIR/srcs/cross-arm-unknown-linux-gnueabi.tgz
 }
 
 function grab_linux_src {
@@ -66,9 +67,9 @@ function do_downloads {
   #grab_grsec_src
   grab_debian_src
 
-  if ! [ -d "$TOOLCHAIN_DIR/gcc-linaro-arm-none-eabi-4.9-2014.09_linux" ]; then
+  if ! [ -d "$TOOLCHAIN_DIR/arm-unknown-linux-gnueabi" ]; then
     cd $SOURCE_DIR/srcs
-    tar xf gcc-linaro-arm-none-eabi-4.9-2014.09_linux.tar.xz
+    tar xf cross-arm-unknown-linux-gnueabi.tgz
     cd $SOURCE_DIR
   fi
 }
@@ -175,17 +176,26 @@ function build_kernel {
       tar xf linux-*.tar.xz
       cd linux-*
       patch -s -p1 < $SOURCE_DIR/srcs/0008-USB-armory-support.patch
+      if [ "$GRSECURITY" = "1" ]; then
+        patch -s -p1 < $SOURCE_DIR/srcs/grsecurity-3.1-4.2.6-201511282239.patch
+      fi
       log_end "OK"
   fi
   touch "$BLDDIR/.kernel-extracted"
 
   log_begin "KERNEL: Building Linux kernel..."
 
-  (cp $SOURCE_DIR/srcs/usbarmory_linux-4.2.config .config && \
-     make uImage LOADADDR=0x70008000 modules imx53-usbarmory.dtb && \
+  if [ "$GRSECURITY" = "1" ]; then
+    CFG_SUFFIX=-grsec
+  else
+    CFG_SUFFIX=
+  fi
+
+  (cp $SOURCE_DIR/srcs/usbarmory_linux-4.2${CFG_SUFFIX}.config .config && \
+     make uImage modules imx53-usbarmory.dtb LOADADDR=0x70008000 -j && \
      cp arch/arm/boot/uImage ${MNTDIR}/boot/ && \
      cp arch/arm/boot/dts/imx53-usbarmory.dtb ${MNTDIR}/boot/imx53-usbarmory.dtb && \
-     make INSTALL_MOD_PATH=$MNTDIR ARCH=arm modules_install) 2>&1 >/dev/null
+     make INSTALL_MOD_PATH=$MNTDIR modules_install) 2>&1 >/dev/null
 
   cd $SOURCE_DIR
   log_end "OK"
@@ -234,10 +244,13 @@ usage: ./do [option]*
 
   Build a full USB Armory image and write it straight to an SD card.
 
-actions:
+Build options:
   -d, --device <dev>             Build and write image to specified device
   -g, --grsecurity               Enable a grsecurity kernel build
   -i, --image <distro>           Distro - options: ubuntu, debian (default)
+  -k, --kernel-only              Only build and install a new kernel
+
+Live USB Armory tools:
   -l, --link                     Link usbarmory IP on usb0
   -s, --shutdown                 Shut down your USB armory
 
@@ -264,16 +277,19 @@ function usbarmory_build {
   mkdir -p $BLDDIR   # -- 0) Setup build directory
   mkdir -p $MNTDIR
 
-  do_downloads       # -- 1) Do downloads
-  sdcard_prep
-  image_debian       # -- 2) Do ARM debootstrap
-  finalize_image     # -- 3) Setup final image
-  build_kernel       # -- 4) Build kernel
-  build_uboot        # -- 5) Build U-Boot
-  sdcard_finish      # -- 6) Write image, kernel and U-Boot
+  if ! [ "$KERNEL_ONLY" = "1" ]; then
+    do_downloads       # -- 0) Do downloads
+    sdcard_prep        # -- 1) Prep SD card
+    image_debian       # -- 2) Do ARM debootstrap
+    finalize_image     # -- 3) Setup final image
+  fi
 
-  ## -- Mount, write image and u-boot, then unmount
+  build_kernel         # -- 4) Build kernel
 
+  if ! [ "$KERNEL_ONLY" = "1" ]; then
+    build_uboot        # -- 5) Build U-Boot
+    sdcard_finish      # -- 6) Write image, kernel and U-Boot
+  fi
 
   log "OK, you should be good to go! (user and pass: usbarmory/usbarmory)"
   exit 0
@@ -329,6 +345,14 @@ do
 
       -s|--shutdown)
       SHUTDOWN=1
+      ;;
+
+      -g|--grsecurity)
+      GRSECURITY=1
+      ;;
+
+      -k|--kernel-only)
+      KERNEL_ONLY=1
       ;;
 
       *)
