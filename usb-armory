@@ -101,7 +101,7 @@ function image_debian {
   fi
 
   log_begin "IMAGE: Installing Debian image..."
-  (qemu-debootstrap --arch=armhf --include=ssh,sudo,ntpdate,fake-hwclock,openssl,shellinabox,vim,nano,cryptsetup,lvm2,locales,less,cpufrequtils,isc-dhcp-server jessie $MNTDIR http://ftp.debian.org/debian/) 2>&1 >/dev/null
+  (qemu-debootstrap --arch=armhf --include=ssh,sudo,ntpdate,fake-hwclock,openssl,vim,nano,cryptsetup,lvm2,locales,less,cpufrequtils,isc-dhcp-server jessie $MNTDIR http://ftp.debian.org/debian/) 2>&1 >/dev/null
 
   cp $SOURCE_DIR/srcs/debian/rc.local     ${MNTDIR}/etc/rc.local
   cp $SOURCE_DIR/srcs/debian/sources.list ${MNTDIR}/etc/apt/sources.list
